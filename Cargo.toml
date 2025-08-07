@@ -1,0 +1,12 @@
+[package]
+name = "cyclemetrics"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpx = "0.10"          # GPX parsing
+clap = { version = "4.5", features = ["derive"] }   # command‑line parsing
+anyhow = "1.0.98"
+glob = "0.3.2"
+geo = "0.30.0"
+
