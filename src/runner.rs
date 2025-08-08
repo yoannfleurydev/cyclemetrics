@@ -10,15 +10,18 @@ use ratatui::{
     symbols::{self},
     text::{Line, Text},
     widgets::{
-        Block, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph, StatefulWidget,
-        Widget,
+        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+        StatefulWidget, Widget, Wrap,
     },
 };
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
-use crate::gpx_total_distance;
+use crate::{
+    gpx::{gpx_elevation_gain, gpx_track_name},
+    gpx_total_distance,
+};
 
 const HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(SLATE.c800);
 const NORMAL_ROW_BG: Color = SLATE.c950;
@@ -50,7 +53,11 @@ struct FileList {
 
 #[derive(Debug)]
 struct FileItem {
-    file: String,
+    file_name: String,
+    distance: f64,
+    name: String,
+    date: String,
+    elevation: String,
 }
 
 pub fn run_cyclemetrics(args: Args) -> Result<()> {
@@ -76,9 +83,19 @@ impl Default for App {
 }
 
 impl FileItem {
-    fn new(file: String) -> Self {
+    fn new(
+        file_name: String,
+        distance: f64,
+        date: String,
+        elevation: String,
+        name: String,
+    ) -> Self {
         Self {
-            file: file.to_string(),
+            file_name,
+            distance,
+            date,
+            elevation,
+            name,
         }
     }
 }
@@ -91,10 +108,7 @@ impl App {
             let files = glob::glob(gpx_path.to_str().unwrap())?;
             for file_res in files {
                 let file_path = file_res?;
-                self.files.push(file_path.to_path_buf());
-                self.file_list
-                    .files
-                    .push(FileItem::new(file_path.display().to_string()));
+
                 // Read the GPX file
                 let file = File::open(&file_path)?;
                 let reader = BufReader::new(file);
@@ -103,6 +117,17 @@ impl App {
                 // Compute distance
                 let distance_m = gpx_total_distance(&gpx);
                 let distance_km = distance_m / 1_000.0;
+
+                let name = gpx_track_name(&gpx).unwrap_or("Activity");
+                let elevation = gpx_elevation_gain(&gpx);
+
+                self.file_list.files.push(FileItem::new(
+                    file_path.display().to_string(),
+                    distance_km,
+                    String::new(),
+                    format!("{}", elevation.round()),
+                    name.to_string(),
+                ));
                 self.grand_total_km += distance_km;
             }
         }
@@ -156,10 +181,11 @@ impl Widget for &mut App {
         let [main_area, footer_area] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
 
-        let [list_area, right_area] =
+        let [list_area, detail_area] =
             Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(main_area);
 
         self.render_list(list_area, buf);
+        self.render_detail(detail_area, buf);
         self.render_footer(footer_area, buf);
 
         // let title = Line::from(" CycleMetrics ".bold());
@@ -196,7 +222,7 @@ impl Widget for &mut App {
 impl App {
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new()
-            .title(Line::raw("Activities").centered())
+            .title(Line::raw("Activities").centered().fg(SLATE.c300))
             .borders(Borders::RIGHT)
             .border_set(symbols::border::EMPTY)
             .border_style(HEADER_STYLE)
@@ -225,9 +251,38 @@ impl App {
     fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
         let grand_total = Text::from(vec![Line::from(vec![
             "Grand Total: ".into(),
-            format!("{:>8.3}", self.grand_total_km).to_string().yellow(),
+            format_distance(self.grand_total_km).to_string().yellow(),
         ])]);
         Paragraph::new(grand_total).centered().render(area, buf);
+    }
+
+    fn render_detail(&mut self, area: Rect, buf: &mut Buffer) {
+        let info = if let Some(i) = self.file_list.state.selected() {
+            format!(
+                "Distance: {} Elevation: {:>4}m {}",
+                format_distance(self.file_list.files[i].distance),
+                self.file_list.files[i].elevation,
+                self.file_list.files[i].name,
+            )
+        } else {
+            "No activity selected...".to_string()
+        };
+
+        // We show the list item's info under the list in this paragraph
+        let block = Block::new()
+            .title(Line::raw("Activity Detail").centered())
+            .borders(Borders::TOP)
+            .border_set(symbols::border::EMPTY)
+            .border_style(HEADER_STYLE)
+            .bg(SLATE.c950)
+            .padding(Padding::horizontal(1));
+
+        // We can now render the item info
+        Paragraph::new(info)
+            .block(block)
+            .fg(SLATE.c100)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
     }
 }
 
@@ -241,48 +296,12 @@ const fn alternate_colors(i: usize) -> Color {
 
 impl From<&FileItem> for ListItem<'_> {
     fn from(value: &FileItem) -> Self {
-        let line = Line::styled(format!("{}", value.file), SLATE.c200);
+        let line = Line::styled(format!("{}", value.file_name), SLATE.c200);
 
         ListItem::new(line)
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use ratatui::style::Style;
-
-//     #[test]
-//     fn render() {
-//         let app = App::default();
-//         let mut buf = Buffer::empty(Rect::new(0, 0, 50, 4));
-
-//         app.render(buf.area, &mut buf);
-
-//         let mut expected = Buffer::with_lines(vec![
-//             "┏━━━━━━━━━━━━━ Counter App Tutorial ━━━━━━━━━━━━━┓",
-//             "┃                    Value: 0                    ┃",
-//             "┃                                                ┃",
-//             "┗━ Decrement <Left> Increment <Right> Quit <Q> ━━┛",
-//         ]);
-//         let title_style = Style::new().bold();
-//         let counter_style = Style::new().yellow();
-//         let key_style = Style::new().blue().bold();
-//         expected.set_style(Rect::new(14, 0, 22, 1), title_style);
-//         expected.set_style(Rect::new(28, 1, 1, 1), counter_style);
-//         expected.set_style(Rect::new(13, 3, 6, 1), key_style);
-//         expected.set_style(Rect::new(30, 3, 7, 1), key_style);
-//         expected.set_style(Rect::new(43, 3, 4, 1), key_style);
-
-//         assert_eq!(buf, expected);
-//     }
-
-//     #[test]
-//     fn handle_key_event() -> Result<()> {
-//         let mut app = App::default();
-//         app.handle_key_event(KeyCode::Char('q').into());
-//         assert!(app.exit);
-
-//         Ok(())
-//     }
-// }
+fn format_distance(distance: f64) -> String {
+    format!("{:>8.3}km", distance)
+}
