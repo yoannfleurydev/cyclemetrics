@@ -6,7 +6,7 @@ use ratatui::{
     DefaultTerminal,
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize, palette::tailwind::SLATE},
+    style::{Modifier, Style, Stylize, palette::tailwind::SLATE},
     symbols::{self},
     text::{Line, Text},
     widgets::{
@@ -19,14 +19,11 @@ use std::io::BufReader;
 use std::path::PathBuf;
 
 use crate::{
-    gpx::{gpx_elevation_gain, gpx_track_name},
+    gpx::{gpx_elevation_gain, gpx_start_end_date, gpx_track_name},
     gpx_total_distance,
 };
 
-const HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(SLATE.c800);
-const NORMAL_ROW_BG: Color = SLATE.c950;
-const ALT_ROW_BG_COLOR: Color = SLATE.c900;
-const SELECTED_STYLE: Style = Style::new().bg(SLATE.c800).add_modifier(Modifier::BOLD);
+const SELECTED_STYLE: Style = Style::new().add_modifier(Modifier::BOLD);
 
 /// Compute the total track distance of one or more GPX files.
 #[derive(Parser, Debug)]
@@ -51,12 +48,12 @@ struct FileList {
     state: ListState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FileItem {
     file_name: String,
     distance: f64,
     name: String,
-    date: String,
+    start_date: String,
     elevation: String,
 }
 
@@ -86,14 +83,14 @@ impl FileItem {
     fn new(
         file_name: String,
         distance: f64,
-        date: String,
+        start_date: String,
         elevation: String,
         name: String,
     ) -> Self {
         Self {
             file_name,
             distance,
-            date,
+            start_date,
             elevation,
             name,
         }
@@ -121,10 +118,14 @@ impl App {
                 let name = gpx_track_name(&gpx).unwrap_or("Activity");
                 let elevation = gpx_elevation_gain(&gpx);
 
+                let start_end_dates = gpx_start_end_date(&gpx);
+
                 self.file_list.files.push(FileItem::new(
                     file_path.display().to_string(),
                     distance_km,
-                    String::new(),
+                    start_end_dates.map_or(String::new(), |(start, _)| {
+                        format!("{}", start.format("%d-%m-%Y"))
+                    }),
                     format!("{}", elevation.round()),
                     name.to_string(),
                 ));
@@ -187,62 +188,28 @@ impl Widget for &mut App {
         self.render_list(list_area, buf);
         self.render_detail(detail_area, buf);
         self.render_footer(footer_area, buf);
-
-        // let title = Line::from(" CycleMetrics ".bold());
-        // // let instructions = Line::from(vec![
-        // //     " Decrement ".into(),
-        // //     "<Left>".blue().bold(),
-        // //     " Increment ".into(),
-        // //     "<Right>".blue().bold(),
-        // //     " Quit ".into(),
-        // //     "<Q> ".blue().bold(),
-        // // ]);
-        // let block = Block::bordered()
-        //     .title(title)
-        //     // .title_bottom(instructions.centered())
-        //     .border_set(border::THICK);
-
-        // let files = self
-        //     .files
-        //     .iter()
-        //     .map(|file| Text::from(vec![Line::from(format!("{:>30}", file.display()))]));
-
-        // let counter_text = Text::from(vec![Line::from(vec![
-        //     "Grand Total: ".into(),
-        //     format!("{:>8.3}", self.grand_total_km).to_string().yellow(),
-        // ])]);
-
-        // Paragraph::new(counter_text)
-        //     .centered()
-        //     .block(block)
-        //     .render(area, buf);
     }
 }
 
 impl App {
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new()
-            .title(Line::raw("Activities").centered().fg(SLATE.c300))
+            .title(Line::raw("Activities").centered())
             .borders(Borders::RIGHT)
-            .border_set(symbols::border::EMPTY)
-            .border_style(HEADER_STYLE)
-            .bg(SLATE.c950);
+            .border_set(symbols::border::EMPTY);
 
         let items: Vec<ListItem> = self
             .file_list
             .files
             .iter()
             .enumerate()
-            .map(|(i, file)| {
-                let color = alternate_colors(i);
-                ListItem::from(file).bg(color)
-            })
+            .map(|(_, file)| ListItem::from(file))
             .collect();
 
         let list = List::new(items)
             .block(block)
             .highlight_style(SELECTED_STYLE)
-            .highlight_symbol(">")
+            .highlight_symbol("> ")
             .highlight_spacing(HighlightSpacing::Always);
 
         StatefulWidget::render(list, area, buf, &mut self.file_list.state);
@@ -258,11 +225,14 @@ impl App {
 
     fn render_detail(&mut self, area: Rect, buf: &mut Buffer) {
         let info = if let Some(i) = self.file_list.state.selected() {
+            let file_info: FileItem = self.file_list.files[i].clone();
+
             format!(
-                "Distance: {} Elevation: {:>4}m {}",
-                format_distance(self.file_list.files[i].distance),
-                self.file_list.files[i].elevation,
-                self.file_list.files[i].name,
+                "Distance: {} Elevation: {:>4}m {}, Start date: {}",
+                format_distance(file_info.distance),
+                file_info.elevation,
+                file_info.name,
+                file_info.start_date
             )
         } else {
             "No activity selected...".to_string()
@@ -271,26 +241,14 @@ impl App {
         // We show the list item's info under the list in this paragraph
         let block = Block::new()
             .title(Line::raw("Activity Detail").centered())
-            .borders(Borders::TOP)
             .border_set(symbols::border::EMPTY)
-            .border_style(HEADER_STYLE)
-            .bg(SLATE.c950)
             .padding(Padding::horizontal(1));
 
-        // We can now render the item info
+        // We can now render the item infoq
         Paragraph::new(info)
             .block(block)
-            .fg(SLATE.c100)
             .wrap(Wrap { trim: false })
             .render(area, buf);
-    }
-}
-
-const fn alternate_colors(i: usize) -> Color {
-    if i % 2 == 0 {
-        NORMAL_ROW_BG
-    } else {
-        ALT_ROW_BG_COLOR
     }
 }
 

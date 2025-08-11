@@ -1,6 +1,8 @@
+use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
 use geo::prelude::Distance;
 use geo::{Haversine, Point, point};
-use gpx::Gpx;
+use gpx::{Gpx, Time};
+use time::OffsetDateTime;
 
 /// Sum the length of all track segments in a GPX.
 pub fn gpx_total_distance(gpx: &Gpx) -> f64 {
@@ -49,4 +51,36 @@ pub fn gpx_elevation_gain(gpx: &Gpx) -> f64 {
     }
 
     gain
+}
+
+/// Returns the start and end date of the GPX file, if available.
+pub fn gpx_start_end_date(gpx: &Gpx) -> Option<(DateTime<FixedOffset>, DateTime<FixedOffset>)> {
+    let mut times: Vec<DateTime<FixedOffset>> = Vec::new();
+    for track in &gpx.tracks {
+        for segment in &track.segments {
+            for point in &segment.points {
+                if let Some(time) = point.time {
+                    times.push(gpx_to_chrono(time));
+                }
+            }
+        }
+    }
+
+    if times.is_empty() {
+        None
+    } else {
+        let min = *times.iter().min()?;
+        let max = *times.iter().max()?;
+        Some((min, max))
+    }
+}
+
+fn gpx_to_chrono(gpx_time: Time) -> DateTime<FixedOffset> {
+    let odt: OffsetDateTime = gpx_time.into();
+
+    let naive_utc: NaiveDateTime =
+        NaiveDateTime::from_timestamp_opt(odt.unix_timestamp(), odt.nanosecond()).unwrap();
+    let offset = FixedOffset::east_opt(odt.offset().whole_seconds()).unwrap();
+
+    DateTime::from_naive_utc_and_offset(naive_utc, offset)
 }
