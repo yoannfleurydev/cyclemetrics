@@ -36,7 +36,6 @@ pub struct Args {
 
 #[derive(Debug)]
 pub struct App {
-    files: Vec<PathBuf>,
     file_list: FileList,
     grand_total_km: f64,
     exit: bool,
@@ -68,7 +67,6 @@ pub fn run_cyclemetrics(args: Args) -> Result<()> {
 impl Default for App {
     fn default() -> Self {
         Self {
-            files: vec![],
             file_list: FileList {
                 files: vec![],
                 state: ListState::default(),
@@ -132,8 +130,6 @@ impl App {
                 self.grand_total_km += distance_km;
             }
         }
-
-        println!("{:?}", self.files);
 
         while !self.exit {
             terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
