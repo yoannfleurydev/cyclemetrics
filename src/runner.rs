@@ -119,7 +119,9 @@ impl App {
                 let start_end_dates = gpx_start_end_date(&gpx);
 
                 self.file_list.files.push(FileItem::new(
-                    file_path.display().to_string(),
+                    start_end_dates.map_or(String::new(), |(start, _)| {
+                        format!("{} {}", start.format("%d-%m-%Y"), name.to_string())
+                    }),
                     distance_km,
                     start_end_dates.map_or(String::new(), |(start, _)| {
                         format!("{}", start.format("%d-%m-%Y"))
