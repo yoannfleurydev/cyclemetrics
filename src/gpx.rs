@@ -1,28 +1,24 @@
-use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
+use chrono::{DateTime, FixedOffset};
 use geo::prelude::Distance;
-use geo::{Haversine, Point, point};
+use geo::{Haversine, point};
 use gpx::{Gpx, Time};
 use time::OffsetDateTime;
 
 /// Sum the length of all track segments in a GPX.
 pub fn gpx_total_distance(gpx: &Gpx) -> f64 {
-    let mut total: f64 = 0.0;
-
-    for track in &gpx.tracks {
-        for segment in &track.segments {
-            let mut last_point: Option<Point> = None;
-            for point in &segment.points {
-                let (lat, lon) = (point.point().y(), point.point().x());
-                let current = point!(x: lon, y: lat);
-                if let Some(prev) = last_point {
-                    total += Haversine.distance(prev, current); // prev.haversine_distance(&current);
-                }
-                last_point = Some(current);
-            }
-        }
-    }
-
-    total
+    gpx.tracks
+        .iter()
+        .flat_map(|track| track.segments.iter())
+        .flat_map(|segment| segment.points.windows(2)) // Taking two points
+        .map(|window| {
+            let (p1, p2) = (&window[0], &window[1]);
+            let (lat1, lon1) = (p1.point().y(), p1.point().x());
+            let (lat2, lon2) = (p2.point().y(), p2.point().x());
+            let pt1 = point!(x: lon1, y: lat1);
+            let pt2 = point!(x: lon2, y: lat2);
+            Haversine.distance(pt1, pt2)
+        })
+        .sum()
 }
 
 /// Returns the name of the first track in a GPX file, if present.
@@ -32,55 +28,52 @@ pub fn gpx_track_name(gpx: &Gpx) -> Option<&str> {
 
 /// Returns the total elevation gain from a GPX file.
 pub fn gpx_elevation_gain(gpx: &Gpx) -> f64 {
-    let mut gain = 0.0;
-    for track in &gpx.tracks {
-        for segment in &track.segments {
-            let mut last_elev: Option<f64> = None;
-            for point in &segment.points {
-                if let Some(elev) = point.elevation {
-                    if let Some(prev_elev) = last_elev {
-                        let diff = elev - prev_elev;
-                        if diff > 0.0 {
-                            gain += diff;
-                        }
-                    }
-                    last_elev = Some(elev);
-                }
-            }
-        }
-    }
+    gpx.tracks
+        .iter()
+        .flat_map(|track| track.segments.iter())
+        .flat_map(|segment| segment.points.windows(2))
+        .map(|window| {
+            let (p1, p2) = (&window[0], &window[1]);
 
-    gain
+            match (p1.elevation, p2.elevation) {
+                (Some(e1), Some(e2)) => {
+                    let diff = e2 - e1;
+                    if diff > 0.0 { diff } else { 0.0 }
+                }
+                _ => 0.0,
+            }
+        })
+        .sum()
 }
 
 /// Returns the start and end date of the GPX file, if available.
 pub fn gpx_start_end_date(gpx: &Gpx) -> Option<(DateTime<FixedOffset>, DateTime<FixedOffset>)> {
-    let mut times: Vec<DateTime<FixedOffset>> = Vec::new();
-    for track in &gpx.tracks {
-        for segment in &track.segments {
-            for point in &segment.points {
-                if let Some(time) = point.time {
-                    times.push(gpx_to_chrono(time));
-                }
-            }
-        }
-    }
+    let times: Vec<DateTime<FixedOffset>> = gpx
+        .tracks
+        .iter()
+        .flat_map(|track| track.segments.iter())
+        .flat_map(|segment| segment.points.iter())
+        .filter_map(|point| point.time.map(gpx_to_chrono))
+        .collect();
 
     if times.is_empty() {
         None
     } else {
-        let min = *times.iter().min()?;
-        let max = *times.iter().max()?;
-        Some((min, max))
+        let start = *times.iter().min()?;
+        let end = *times.iter().max()?;
+
+        Some((start, end))
     }
 }
 
 fn gpx_to_chrono(gpx_time: Time) -> DateTime<FixedOffset> {
-    let odt: OffsetDateTime = gpx_time.into();
+    let offset_date_time: OffsetDateTime = gpx_time.into();
+    let datetime_from_timestamp = DateTime::from_timestamp(
+        offset_date_time.unix_timestamp(),
+        offset_date_time.nanosecond(),
+    )
+    .unwrap();
+    let offset = FixedOffset::east_opt(offset_date_time.offset().whole_seconds()).unwrap();
 
-    let naive_utc: NaiveDateTime =
-        NaiveDateTime::from_timestamp_opt(odt.unix_timestamp(), odt.nanosecond()).unwrap();
-    let offset = FixedOffset::east_opt(odt.offset().whole_seconds()).unwrap();
-
-    DateTime::from_naive_utc_and_offset(naive_utc, offset)
+    datetime_from_timestamp.with_timezone(&offset.into())
 }
