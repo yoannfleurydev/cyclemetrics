@@ -10,8 +10,8 @@ use ratatui::{
     symbols::{self},
     text::{Line, Text},
     widgets::{
-        Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
-        StatefulWidget, Widget, Wrap,
+        Axis, Block, Borders, Chart, HighlightSpacing, List, ListItem, ListState, Padding,
+        Paragraph, StatefulWidget, Widget, Wrap,
     },
 };
 use std::fs::File;
@@ -51,8 +51,6 @@ struct FileList {
 struct FileItem {
     file_name: String,
     distance: f64,
-    name: String,
-    start_date: String,
     elevation: String,
 }
 
@@ -78,19 +76,11 @@ impl Default for App {
 }
 
 impl FileItem {
-    fn new(
-        file_name: String,
-        distance: f64,
-        start_date: String,
-        elevation: String,
-        name: String,
-    ) -> Self {
+    fn new(file_name: String, distance: f64, elevation: String) -> Self {
         Self {
             file_name,
             distance,
-            start_date,
             elevation,
-            name,
         }
     }
 }
@@ -123,11 +113,7 @@ impl App {
                         format!("{} {}", start.format("%d-%m-%Y"), name.to_string())
                     }),
                     distance_km,
-                    start_end_dates.map_or(String::new(), |(start, _)| {
-                        format!("{}", start.format("%d-%m-%Y"))
-                    }),
                     format!("{}", elevation.round()),
-                    name.to_string(),
                 ));
                 self.grand_total_km += distance_km;
             }
@@ -207,7 +193,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(SELECTED_STYLE)
-            .highlight_symbol("> ")
+            .highlight_symbol(">> ")
             .highlight_spacing(HighlightSpacing::Always);
 
         StatefulWidget::render(list, area, buf, &mut self.file_list.state);
@@ -222,15 +208,21 @@ impl App {
     }
 
     fn render_detail(&mut self, area: Rect, buf: &mut Buffer) {
+        let [distance_area, elevation_area] =
+            Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).areas(area);
+
+        self.render_information(distance_area, buf);
+        self.render_elevation_chart(elevation_area, buf);
+    }
+
+    fn render_information(&mut self, area: Rect, buf: &mut Buffer) {
         let info = if let Some(i) = self.file_list.state.selected() {
             let file_info: FileItem = self.file_list.files[i].clone();
 
             format!(
-                "Distance: {} Elevation: {:>4}m {}, Start date: {}",
+                "Distance: {} Elevation: {:>4}m",
                 format_distance(file_info.distance),
                 file_info.elevation,
-                file_info.name,
-                file_info.start_date
             )
         } else {
             "No activity selected...".to_string()
@@ -246,6 +238,19 @@ impl App {
         Paragraph::new(info)
             .block(block)
             .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    fn render_elevation_chart(&mut self, area: Rect, buf: &mut Buffer) {
+        let block = Block::new()
+            .title(Line::raw("Activity Elevation").centered())
+            .border_set(symbols::border::EMPTY)
+            .padding(Padding::horizontal(1));
+
+        Chart::new(vec![])
+            .block(block)
+            .x_axis(Axis::default().title("Distance").style(Style::default()))
+            .y_axis(Axis::default().title("Elevation").style(Style::default()))
             .render(area, buf);
     }
 }
