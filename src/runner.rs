@@ -7,10 +7,10 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style, Stylize, palette::tailwind::SLATE},
-    symbols::{self},
+    symbols::{self, Marker},
     text::{Line, Text},
     widgets::{
-        Axis, Block, Borders, Chart, HighlightSpacing, List, ListItem, ListState, Padding,
+        Axis, Block, Borders, Chart, Dataset, HighlightSpacing, List, ListItem, ListState, Padding,
         Paragraph, StatefulWidget, Widget, Wrap,
     },
 };
@@ -19,7 +19,10 @@ use std::io::BufReader;
 use std::path::PathBuf;
 
 use crate::{
-    gpx::{gpx_elevation_gain, gpx_start_end_date, gpx_track_name},
+    gpx::{
+        elevation_profile_min_max, gpx_elevation_gain, gpx_elevation_profile, gpx_start_end_date,
+        gpx_track_name,
+    },
     gpx_total_distance,
 };
 
@@ -52,6 +55,7 @@ struct FileItem {
     file_name: String,
     distance: f64,
     elevation: String,
+    elevation_profile: Vec<(f64, f64)>, // (distance, elevation)
 }
 
 pub fn run_cyclemetrics(args: Args) -> Result<()> {
@@ -76,11 +80,17 @@ impl Default for App {
 }
 
 impl FileItem {
-    fn new(file_name: String, distance: f64, elevation: String) -> Self {
+    fn new(
+        file_name: String,
+        distance: f64,
+        elevation: String,
+        elevation_profile: Vec<(f64, f64)>,
+    ) -> Self {
         Self {
             file_name,
             distance,
             elevation,
+            elevation_profile,
         }
     }
 }
@@ -108,15 +118,22 @@ impl App {
 
                 let start_end_dates = gpx_start_end_date(&gpx);
 
+                let elevation_profile = gpx_elevation_profile(&gpx);
+
                 self.file_list.files.push(FileItem::new(
                     start_end_dates.map_or(String::new(), |(start, _)| {
                         format!("{} {}", start.format("%d-%m-%Y"), name.to_string())
                     }),
                     distance_km,
                     format!("{}", elevation.round()),
+                    elevation_profile,
                 ));
                 self.grand_total_km += distance_km;
             }
+        }
+
+        if self.file_list.state.selected().is_none() {
+            self.file_list.state.select_first();
         }
 
         while !self.exit {
@@ -220,7 +237,7 @@ impl App {
             let file_info: FileItem = self.file_list.files[i].clone();
 
             format!(
-                "Distance: {} Elevation: {:>4}m",
+                "Distance: {} Uphill ↑: {:>4}m",
                 format_distance(file_info.distance),
                 file_info.elevation,
             )
@@ -247,10 +264,49 @@ impl App {
             .border_set(symbols::border::EMPTY)
             .padding(Padding::horizontal(1));
 
-        Chart::new(vec![])
+        let (data, distance) = if let Some(i) = self.file_list.state.selected() {
+            (
+                self.file_list.files[i].elevation_profile.clone(),
+                self.file_list.files[i]
+                    .elevation_profile
+                    .clone()
+                    .iter()
+                    .last()
+                    .map_or(1000.0, |f| f.0),
+            )
+        } else {
+            (vec![], 100.0)
+        };
+
+        let y_bounds = if let Some((min, max)) = elevation_profile_min_max(&data) {
+            [min - 10.0, max + 50.0]
+        } else {
+            [0.0, 1000.0]
+        };
+
+        let dataset = Dataset::default()
+            .name("Elevation")
+            .marker(Marker::Dot)
+            .graph_type(ratatui::widgets::GraphType::Line)
+            .style(Style::default().green())
+            .data(&data);
+
+        Chart::new(vec![dataset])
             .block(block)
-            .x_axis(Axis::default().title("Distance").style(Style::default()))
-            .y_axis(Axis::default().title("Elevation").style(Style::default()))
+            .x_axis(
+                Axis::default()
+                    .title("Distance (km)")
+                    .labels(["0".to_string(), distance.to_string()])
+                    .bounds([0.0, distance])
+                    .style(Style::default()),
+            )
+            .y_axis(
+                Axis::default()
+                    .title("Elevation (m)")
+                    .bounds(y_bounds)
+                    .labels(y_bounds.iter().map(|item| format!("{:>8.2}", item)))
+                    .style(Style::default()),
+            )
             .render(area, buf);
     }
 }

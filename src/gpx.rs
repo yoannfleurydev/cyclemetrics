@@ -66,6 +66,43 @@ pub fn gpx_start_end_date(gpx: &Gpx) -> Option<(DateTime<FixedOffset>, DateTime<
     }
 }
 
+pub fn gpx_elevation_profile(gpx: &Gpx) -> Vec<(f64, f64)> {
+    let mut total_distance = 0.0;
+
+    gpx.tracks
+        .iter()
+        .flat_map(|track| track.segments.iter())
+        .flat_map(|segment| segment.points.windows(2))
+        .filter_map(|window| {
+            let (p1, p2) = (&window[0], &window[1]);
+            match (p2.elevation, Some(p1)) {
+                (Some(elevation), Some(prev)) => {
+                    let (lat1, lon1) = (prev.point().y(), prev.point().x());
+                    let (lat2, lon2) = (p2.point().y(), p2.point().x());
+                    let pt1 = point!(x: lon1, y: lat1);
+                    let pt2 = point!(x: lon2, y: lat2);
+
+                    total_distance += Haversine.distance(pt1, pt2);
+                    Some((total_distance / 1000.0, elevation)) // distance in km
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// Returns the lowest and highest elevation from the elevation profile.
+pub fn elevation_profile_min_max(elevation_profile: &Vec<(f64, f64)>) -> Option<(f64, f64)> {
+    let elevations: Vec<f64> = elevation_profile.iter().map(|&(_, ele)| ele).collect();
+    if elevations.is_empty() {
+        None
+    } else {
+        let min = elevations.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = elevations.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        Some((min, max))
+    }
+}
+
 fn gpx_to_chrono(gpx_time: Time) -> DateTime<FixedOffset> {
     let offset_date_time: OffsetDateTime = gpx_time.into();
     let datetime_from_timestamp = DateTime::from_timestamp(
