@@ -296,7 +296,7 @@ impl App {
             .x_axis(
                 Axis::default()
                     .title("Distance (km)")
-                    .labels(["0".to_string(), distance.to_string()])
+                    .labels(["0".to_string(), format_distance(distance)])
                     .bounds([0.0, distance])
                     .style(Style::default()),
             )
